@@ -25,6 +25,9 @@ uuid = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 deps = ["LinearAlgebra", "Random", "Serialization", "Sockets"]
 uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 
+[[FileWatching]]
+uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
+
 [[GitHub]]
 deps = ["Base64", "Compat", "HTTP", "JSON", "MbedTLS"]
 git-tree-sha1 = "fda289bf374848dcfbfc3ddf92ecb98df9cacc86"
@@ -79,6 +82,12 @@ version = "0.6.0"
 [[Mmap]]
 uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 
+[[OrderedCollections]]
+deps = ["Random", "Serialization", "Test"]
+git-tree-sha1 = "cc23c786049328c93138da14e7020a464d707a23"
+uuid = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+version = "0.1.0"
+
 [[Pkg]]
 deps = ["Dates", "LibGit2", "Markdown", "Printf", "REPL", "Random", "SHA", "UUIDs"]
 uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
@@ -94,6 +103,12 @@ uuid = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
 [[Random]]
 deps = ["Serialization"]
 uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+
+[[Revise]]
+deps = ["Distributed", "FileWatching", "InteractiveUtils", "LibGit2", "OrderedCollections", "Pkg", "REPL", "Random", "Test", "UUIDs", "Unicode"]
+git-tree-sha1 = "48ad8dcdacf24185eb1bc4253a17dc39e1485079"
+uuid = "295af30f-e4ad-537b-8983-00126c2a3abe"
+version = "0.7.10"
 
 [[SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"

@@ -1,9 +1,10 @@
 module Zeptobot
 
-using HTTP, JSON, GitHub, Dates
+using HTTP, JSON, GitHub, Dates, Sockets, Logging
 
 USERNAME  = Ref{String}()
 TOKEN     = Ref{String}()
+LOGDIR    = Ref{String}()
 REGISTRATION_OK_AGE = Day(3)
 
 function __init__()
@@ -19,6 +20,13 @@ function __init__()
     else
         print("Please enter a GitHub token: ")
         TOKEN[] = readline(stdin)
+    end
+
+    if haskey(ENV, "ZEPTO_LOGDIR")
+        LOGDIR[] = ENV["ZEPTO_LOGDIR"]
+    else
+        print("Please enter a path to the log directory: ")
+        LOGDIR[] = readline(stdin)
     end
 end
 
@@ -95,7 +103,7 @@ function getURLallpages(s::AbstractString; kw...)
     return entries
 end
 
-getPRs() = pull_requests("JuliaLang/METADATA.jl", params = Dict("state" => "open"))
+getPRs(;repo = "JuliaLang/METADATA.jl") = pull_requests(repo, params = Dict("state" => "open"))
 
 getStatuses(pr::PullRequest) = getURLallpages(pr._links["statuses"]["href"])
 
@@ -157,7 +165,7 @@ function mergeable(pr::PullRequest)
 
         @info "PR tries to register new package"
 
-        if (now() - pr.created_at) >= REGISTRATION_OK_AGE
+        if (now(UTC) - pr.created_at) >= REGISTRATION_OK_AGE
             return true
         else
             @info "Skipping: PR is younger than $REGISTRATION_OK_AGE"
@@ -168,13 +176,13 @@ function mergeable(pr::PullRequest)
     end
 end
 
-function merge(pr::PullRequest)
-    title = "$(pr.title) [$(match(r"(?<=\()(.*)(?=\))",pr.body).match)] (#$(pr.number))"
-    comment = "Merged automatically by Zeptobot"
-
+function merge(pr::PullRequest;
+    title = "$(pr.title) [$(match(r"(?<=\()(.*)(?=\))",pr.body).match)] (#$(pr.number))",
+    comment = "Merged automatically by Zeptobot")
+    
     r = HTTP.request(
         "PUT",
-        "http://api.github.com/repos/JuliaLang/METADATA.jl/pulls/$(pr.number)/merge",
+        "http://api.github.com/repos/$(pr.base.repo.full_name)/pulls/$(pr.number)/merge",
         Dict("User-Agent" => USERNAME[],
              "Authorization" => "token $(TOKEN[])",
              "Accept" => "application/vnd.github.v3+json"),
@@ -195,7 +203,7 @@ end
 # FixMe! Not implemented yet
 closeable(pr) = false
 
-function process(prs::Vector{PullRequest} = pull_requests("JuliaLang/METADATA.jl", params = Dict("state" => "open"))[1]; dryrun = false)
+function process(;repo = "JuliaLang/METADATA.jl", prs::Vector{PullRequest} = pull_requests(repo, params = Dict("state" => "open"))[1], dryrun = false)
 
     if dryrun
         @warn "Running in dry-run mode. No actions taken."
@@ -256,6 +264,79 @@ function process(prs::Vector{PullRequest} = pull_requests("JuliaLang/METADATA.jl
     @info "$merge_count_success out of $merge_count PRs merged successfully"
     @info "$close_count_success out of $close_count PRs closed successfully"
 
+    return nothing
+end
+
+function restartPending(;repo = "JuliaLang/METADATA.jl", prs::Vector{PullRequest} = pull_requests(repo, params = Dict("state" => "open"))[1])
+
+    for pr in prs
+        # Check test status
+        @info "Checking test status"
+        statuses = map(t -> t["context"], filter(t -> t["state"] == "success", getStatuses(pr)))
+        if !(("JuliaCIBot" ∈ statuses) &&
+             ("continuous-integration/travis-ci/pr" ∈ statuses))
+            @info "Skipping: Tests failed or still in progess"
+            return false
+        end
+    end
+end
+
+# A small server to listen for METADATA events and run process if necessary
+function serveMETADATA(;repo = "JuliaLang/METADATA.jl", port = 6384, auth = GitHub.authenticate(Zeptobot.TOKEN[]), secret = "")
+
+    # Initialize "global" counter for the logs
+    logcounter = 0
+
+    # Setup EventListener
+    e = GitHub.EventListener(auth = auth, secret = secret) do event
+
+        # Create daily logging directory if needed
+        todaydir = joinpath(LOGDIR[], replace(string(today()), "-" => ""))
+        if !isdir(todaydir)
+            mkdir(todaydir)
+            logcounter = 1
+        elseif isempty(todaydir)
+            logcounter = 1
+        else
+            # Find the latest job id
+            logcounter = parse(Int, match(r"[0-9]{4}", last(sort(readdir(todaydir)))).match) + 1
+        end
+        
+        # Setup logfile environment
+        prefix = joinpath(todaydir, "job$(lpad(logcounter, 4, '0'))")
+        open(prefix*"stderr.log", "w") do f
+            with_logger(SimpleLogger(f)) do
+
+            @info "Received an event from GitHub. Processing!"
+            if event.kind != "status"
+                @error "event is not a status update"
+                return HTTP.Response(500)
+            else
+                name = event.payload["name"]
+                if name != repo
+                    @error "Received an event from the wrong repo"
+                    return HTTP.Response(500)
+                end
+
+                if event.payload["state"] == "success"
+                    @info "Event status: success. Trying to merge PRs..."
+                    process(repo = repo)
+                    return HTTP.Response(200)
+                else
+                    @info "Status: pending"
+                    return HTTP.Response(200)
+                end
+            end
+        end
+        end
+    end
+
+    if !isdir(LOGDIR[])
+        @info "Creating log directory"
+        mkdir(LOGDIR[])
+    end
+
+    GitHub.run(e, getipaddr(), port)
     return nothing
 end
 
